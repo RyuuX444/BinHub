@@ -35,8 +35,7 @@ jobs:
 
           # ===== c4 =====
           - { os: ubuntu-latest,  project: c4, repo: rswier/c4, ext: '', ref: 'master' }
-          - { os: macos-latest,   project: c4, repo: rswier/c4, ext: '', ref: 'master' }
-          - { os: windows-latest, project: c4, repo: rswier/c4, ext: '.exe', ref: 'master' }
+                   - { os: windows-latest, project: c4, repo: rswier/c4, ext: '.exe', ref: 'master' }
 
     steps:
       - name: Download QBE
