@@ -1,0 +1,135 @@
+name: Build All Projects
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ===== chibicc =====
+          - { os: ubuntu-latest,  project: chibicc, repo: rui314/chibicc,    ext: '' }
+          - { os: macos-latest,   project: chibicc, repo: rui314/chibicc,    ext: '' }
+          - { os: windows-latest, project: chibicc, repo: rui314/chibicc,    ext: '.exe' }
+
+          # ===== tcc =====
+          - { os: ubuntu-latest,  project: tcc, repo: TinyCC/tinycc,         ext: '',     ref: 'mob' }
+          - { os: macos-latest,   project: tcc, repo: TinyCC/tinycc,         ext: '',     ref: 'mob' }
+          - { os: windows-latest, project: tcc, repo: TinyCC/tinycc,         ext: '.exe', ref: 'mob' }
+
+          # ===== qbe =====
+          - { os: ubuntu-latest,  project: qbe, repo: c9x.me/qbe,            ext: '' }
+          - { os: macos-latest,   project: qbe, repo: c9x.me/qbe,            ext: '' }
+          - { os: windows-latest, project: qbe, repo: c9x.me/qbe,            ext: '.exe' }
+
+          # ===== cproc =====
+          - { os: ubuntu-latest,  project: cproc, repo: michaelforney/cproc, ext: '' }
+          - { os: macos-latest,   project: cproc, repo: michaelforney/cproc, ext: '' }
+          - { os: windows-latest, project: cproc, repo: michaelforney/cproc, ext: '.exe' }
+
+          # ===== 8cc =====
+          - { os: ubuntu-latest,  project: 8cc, repo: rui314/8cc,            ext: '' }
+          - { os: macos-latest,   project: 8cc, repo: rui314/8cc,            ext: '' }
+          - { os: windows-latest, project: 8cc, repo: rui314/8cc,            ext: '.exe' }
+
+          # ===== c4 =====
+          - { os: ubuntu-latest,  project: c4, repo: rswier/c4,              ext: '' }
+          - { os: macos-latest,   project: c4, repo: rswier/c4,              ext: '' }
+          - { os: windows-latest, project: c4, repo: rswier/c4,              ext: '.exe' }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref || 'main' }}
+          path: src
+
+      - name: Build
+        working-directory: src
+        shell: bash
+        run: |
+          if [ -f configure ]; then ./configure; fi
+          if [ -f Makefile ]; then make; fi
+          if [ -f c4.c ]; then gcc -o c4 c4.c; fi
+
+      - name: Determine platform name
+        shell: bash
+        run: |
+          case "${{ matrix.os }}" in
+            ubuntu-latest)  echo "PLATFORM=linux"   >> $GITHUB_ENV ;;
+            macos-latest)   echo "PLATFORM=macos"   >> $GITHUB_ENV ;;
+            windows-latest) echo "PLATFORM=windows" >> $GITHUB_ENV ;;
+          esac
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mkdir -p out/${{ matrix.project }}
+          if [ -f "src/${{ matrix.project }}${{ matrix.ext }}" ]; then
+            cp "src/${{ matrix.project }}${{ matrix.ext }}" "out/${{ matrix.project }}/${{ matrix.project }}-${PLATFORM}${{ matrix.ext }}"
+          else
+            find src -maxdepth 2 -name "${{ matrix.project }}*" -type f -exec cp {} "out/${{ matrix.project }}/${{ matrix.project }}-${PLATFORM}${{ matrix.ext }}" \;
+          fi
+          ls -la out/${{ matrix.project }}/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.project }}-${{ matrix.os }}
+          path: out/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: Merge into single tree
+        run: |
+          mkdir -p binhub
+
+          find all-artifacts -type f -exec sh -c '
+            for file do
+              project=$(echo "$file" | sed -E "s|.*/out/([^/]+)/.*|\1|")
+              mkdir -p "binhub/$project"
+              cp -n "$file" "binhub/$project/"
+            done
+          ' sh {} +
+
+          echo "=== Final tree ==="
+          find binhub -type f | sort
+          echo ""
+          echo "=== File count ==="
+          find binhub -type f | wc -l
+
+      - name: Create archive
+        run: |
+          tar -czf binhub.tar.gz binhub
+          zip -r binhub.zip binhub
+          ls -la binhub.*
+
+      - name: Show contents
+        run: |
+          echo "=== tar.gz contents ==="
+          tar -tzf binhub.tar.gz
+          echo ""
+          echo "=== zip contents ==="
+          unzip -l binhub.zip
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: binhub-latest
+          name: "BinHub (latest)"
+          files: |
+            binhub.tar.gz
+            binhub.zip
+          overwrite: true
