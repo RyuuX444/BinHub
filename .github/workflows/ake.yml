@@ -26,7 +26,7 @@ jobs:
           - { os: macos-latest,   project: qbe, repo: '', ext: '' }
           - { os: windows-latest, project: qbe, repo: '', ext: '.exe' }
 
-          # ===== cproc (sr.ht) =====
+          # ===== cproc (sr.ht mirror) =====
           - { os: ubuntu-latest,  project: cproc, repo: '', ext: '' }
 
           # ===== 8cc =====
@@ -35,7 +35,7 @@ jobs:
 
           # ===== c4 =====
           - { os: ubuntu-latest,  project: c4, repo: rswier/c4, ext: '', ref: 'master' }
-                   - { os: windows-latest, project: c4, repo: rswier/c4, ext: '.exe', ref: 'master' }
+          - { os: windows-latest, project: c4, repo: rswier/c4, ext: '.exe', ref: 'master' }
 
     steps:
       - name: Download QBE
@@ -66,7 +66,7 @@ jobs:
         run: |
           if [ -f configure ]; then ./configure; fi
           if [ -f Makefile ]; then make; fi
-          if [ -f c4.c ]; then cc -o c4 c4.c; fi
+          if [ -f c4.c ]; then cc -w -std=gnu89 -o c4 c4.c; fi
 
       - name: Platform name
         shell: bash
@@ -138,6 +138,14 @@ jobs:
           tar -czf binhub.tar.gz binhub
           zip -r binhub.zip binhub
           ls -la binhub.*
+
+      - name: Show contents
+        run: |
+          echo "=== tar.gz contents ==="
+          tar -tzf binhub.tar.gz
+          echo ""
+          echo "=== zip contents ==="
+          unzip -l binhub.zip
 
       - uses: softprops/action-gh-release@v2
         with:
