@@ -1,0 +1,150 @@
+name: Build All Projects
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ===== chibicc =====
+          - { os: ubuntu-latest,  project: chibicc, repo: rui314/chibicc, ext: '', ref: 'main' }
+          - { os: macos-latest,   project: chibicc, repo: rui314/chibicc, ext: '', ref: 'main' }
+
+          # ===== tcc =====
+          - { os: ubuntu-latest,  project: tcc, repo: TinyCC/tinycc, ext: '', ref: 'mob' }
+          - { os: macos-latest,   project: tcc, repo: TinyCC/tinycc, ext: '', ref: 'mob' }
+          - { os: windows-latest, project: tcc, repo: TinyCC/tinycc, ext: '.exe', ref: 'mob' }
+
+          # ===== qbe (download) =====
+          - { os: ubuntu-latest,  project: qbe, repo: '', ext: '' }
+          - { os: macos-latest,   project: qbe, repo: '', ext: '' }
+          - { os: windows-latest, project: qbe, repo: '', ext: '.exe' }
+
+          # ===== cproc (sr.ht) =====
+          - { os: ubuntu-latest,  project: cproc, repo: '', ext: '' }
+
+          # ===== 8cc =====
+          - { os: ubuntu-latest,  project: 8cc, repo: rui314/8cc, ext: '', ref: 'master' }
+          - { os: macos-latest,   project: 8cc, repo: rui314/8cc, ext: '', ref: 'master' }
+
+          # ===== c4 =====
+          - { os: ubuntu-latest,  project: c4, repo: rswier/c4, ext: '', ref: 'master' }
+          - { os: macos-latest,   project: c4, repo: rswier/c4, ext: '', ref: 'master' }
+          - { os: windows-latest, project: c4, repo: rswier/c4, ext: '.exe', ref: 'master' }
+
+    steps:
+      - name: Download QBE
+        if: matrix.project == 'qbe'
+        shell: bash
+        run: |
+          curl -L -o qbe.tar.xz https://c9x.me/compile/release/qbe-1.2.tar.xz
+          mkdir -p src
+          tar -xf qbe.tar.xz -C src --strip-components=1
+
+      - name: Clone cproc
+        if: matrix.project == 'cproc'
+        shell: bash
+        run: |
+          git clone https://github.com/michaelforney/cproc src
+
+      - name: Checkout
+        if: matrix.project != 'qbe' && matrix.project != 'cproc'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repo }}
+          ref: ${{ matrix.ref || 'main' }}
+          path: src
+
+      - name: Build
+        working-directory: src
+        shell: bash
+        run: |
+          if [ -f configure ]; then ./configure; fi
+          if [ -f Makefile ]; then make; fi
+          if [ -f c4.c ]; then cc -o c4 c4.c; fi
+
+      - name: Platform name
+        shell: bash
+        run: |
+          case "${{ matrix.os }}" in
+            ubuntu-latest)  echo "PLATFORM=linux"   >> $GITHUB_ENV ;;
+            macos-latest)   echo "PLATFORM=macos"   >> $GITHUB_ENV ;;
+            windows-latest) echo "PLATFORM=windows" >> $GITHUB_ENV ;;
+          esac
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mkdir -p out/${{ matrix.project }}
+
+          FOUND=""
+          if [ -f "src/${{ matrix.project }}${{ matrix.ext }}" ]; then
+            FOUND="src/${{ matrix.project }}${{ matrix.ext }}"
+          else
+            FOUND=$(find src -maxdepth 2 -name "${{ matrix.project }}*" -type f | head -1)
+          fi
+
+          if [ -n "$FOUND" ]; then
+            cp "$FOUND" "out/${{ matrix.project }}/${{ matrix.project }}-${PLATFORM}${{ matrix.ext }}"
+            echo "Copied: $FOUND"
+          else
+            echo "ERROR: binary not found"
+            ls -la src/
+            exit 1
+          fi
+
+          ls -la out/${{ matrix.project }}/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.project }}-${{ matrix.os }}
+          path: out/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+
+      - name: Merge into single tree
+        run: |
+          mkdir -p binhub
+
+          find all-artifacts -type f -exec sh -c '
+            for file do
+              project=$(echo "$file" | sed -E "s|.*/out/([^/]+)/.*|\1|")
+              mkdir -p "binhub/$project"
+              cp -n "$file" "binhub/$project/"
+            done
+          ' sh {} +
+
+          echo "=== Final tree ==="
+          find binhub -type f | sort
+          echo ""
+          echo "=== File count ==="
+          find binhub -type f | wc -l
+
+      - name: Create archives
+        run: |
+          tar -czf binhub.tar.gz binhub
+          zip -r binhub.zip binhub
+          ls -la binhub.*
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: binhub-latest
+          name: "BinHub (latest)"
+          files: |
+            binhub.tar.gz
+            binhub.zip
+          overwrite: true
